@@ -92,10 +92,12 @@ int main(int argc, char *argv[]) {
     startTime = time(NULL);
 
     memset(processTable, 0, sizeof(processTable));
-    int nextLaunchNS = 0;
+    unsigned long nextLaunchTime = 0;
+    unsigned long nextPrintTime = 0;
 
-    while (running && totalLaunched < maxProcesses) {
-        incrementClock(50000); // 50 microseconds per loop
+    while (running && (totalLaunched < maxProcesses || activeChildren > 0)) {
+        usleep(5000); // simulate passage of real time
+        incrementClock(50000);
 
         int pid = waitpid(-1, NULL, WNOHANG);
         if (pid > 0) {
@@ -108,7 +110,9 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        if (simClock->nanoseconds >= nextLaunchNS && activeChildren < simul && totalLaunched < maxProcesses) {
+        unsigned long currentTime = (unsigned long)simClock->seconds * BILLION + simClock->nanoseconds;
+
+        if (currentTime >= nextLaunchTime && activeChildren < simul && totalLaunched < maxProcesses) {
             int slot = findFreePCBSlot();
             if (slot != -1) {
                 int sec = rand() % timeLimit + 1;
@@ -124,24 +128,26 @@ int main(int argc, char *argv[]) {
                     perror("execl");
                     exit(1);
                 } else {
+                    printf("[OSS] Launched worker PID %d\n", cpid);
                     processTable[slot].occupied = 1;
                     processTable[slot].pid = cpid;
                     processTable[slot].startSeconds = simClock->seconds;
                     processTable[slot].startNano = simClock->nanoseconds;
                     totalLaunched++;
                     activeChildren++;
+                    nextLaunchTime = currentTime + (launchInterval * 1000000);
                 }
-                nextLaunchNS = simClock->nanoseconds + launchInterval * 1000000;
             }
         }
 
-        if (simClock->nanoseconds % 500000000 < 50000) {
-            printf("OSS PID:%d SysClockS:%u SysClockNano:%u\nProcess Table:\n", getpid(), simClock->seconds, simClock->nanoseconds);
+        if (currentTime >= nextPrintTime) {
+            printf("\nOSS PID:%d SysClockS:%u SysClockNano:%u\nProcess Table:\n", getpid(), simClock->seconds, simClock->nanoseconds);
             printf("Entry Occupied PID StartS StartN\n");
             for (int i = 0; i < MAX_PROCESSES; i++) {
                 if (processTable[i].occupied)
                     printf("%d %d %d %d %d\n", i, processTable[i].occupied, processTable[i].pid, processTable[i].startSeconds, processTable[i].startNano);
             }
+            nextPrintTime = currentTime + 500000000;
         }
     }
 
